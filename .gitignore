@@ -9,6 +9,7 @@ token.pickle
 bin/
 obj/
 __pycache__
+*.pyproj
 *.sln
 *.user
 *.userosscache
