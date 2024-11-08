@@ -1,17 +1,18 @@
 ﻿from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.errors import HttpError
+from google.auth.transport.requests import Request
 from datetime import datetime, timedelta
 import pytz
 import os
 import pickle
 import re
 
-# Визначення поточного часу з урахуванням часової зони
+# Define timezone
 timezone = pytz.timezone("Europe/Kyiv")
 now = datetime.now(timezone)
 
-# Авторизація та підключення до API
+# Authenticate and connect to the Google API
 def get_authenticated_service():
     creds = None
     if os.path.exists('token.pickle'):
@@ -32,78 +33,88 @@ def get_authenticated_service():
 
     return build('tasks', 'v1', credentials=creds), build('calendar', 'v3', credentials=creds)
 
-# Функція для перенесення задачі в інший список із збереженням дедлайну
-def move_task_to_another_list(task_service, task_id, current_task_list_id, new_task_list_id):
-    # Отримуємо задачу з поточного списку
-    task = task_service.tasks().get(tasklist=current_task_list_id, task=task_id).execute()
+# Function to dynamically fetch all task list IDs
+def get_task_list_ids(task_service):
+    task_lists = task_service.tasklists().list().execute().get('items', [])
+    return [task_list['id'] for task_list in task_lists]
 
-    # Зберігаємо дедлайн без часу (отримуємо тільки дату)
+# Function to move a task to a new list and preserve its deadline
+def move_task_to_another_list(task_service, task_id, current_task_list_id, new_task_list_id):
+    task = task_service.tasks().get(tasklist=current_task_list_id, task=task_id).execute()
     due_date = task.get('due', None)
 
-    # Перетворюємо час з нотаток у формат HH:MM
+    # Extract due time from notes, if present
     task_time = None
     if 'notes' in task:
         task_time = convert_notes_to_due_time(task['notes'])
-        print(f"Час з нотаток: {task_time}")
-    
-    # Видаляємо зайві атрибути для вставки
+        print(f"Time from notes: {task_time}")
+
+    # Remove unnecessary fields for insertion
     for key in ['id', 'etag', 'selfLink', 'position', 'updated']:
         task.pop(key, None)
 
-    # Додаємо дедлайн, якщо він був присутній
+    # Set the due date and add notes with time if applicable
     if due_date:
         task['due'] = due_date
-
-    # Додаємо час із нотаток (якщо він є) у новий опис (notes)
     if task_time:
-        task['notes'] = f"📅 Час дедлайну: {task_time}"
+        task['notes'] = f"📅 Deadline time: {task_time}"
 
-    # Створюємо завдання в новому списку з дедлайном
+    # Insert task in the new list
     new_task = task_service.tasks().insert(tasklist=new_task_list_id, body=task).execute()
-    print(f"Задачу '{new_task['title']}' перенесено в новий список: {new_task_list_id} із дедлайном {new_task.get('due', 'без дедлайну')}")
+    print(f"Task '{new_task['title']}' moved to new list: {new_task_list_id} with deadline {new_task.get('due', 'no deadline')}")
 
-    # Видаляємо оригінальне завдання з поточного списку
+    # Delete the original task from the old list
     task_service.tasks().delete(tasklist=current_task_list_id, task=task_id).execute()
 
-# Функція для перетворення часу з нотаток у формат HH:MM на текст
+# Function to convert time from notes to HH:MM format
 def convert_notes_to_due_time(notes):
-    # Шукаємо час у форматі HH:MM в нотатках
     match = re.search(r'(\d{2}):(\d{2})', notes)
     if match:
-        return match.group(0)  # Повертаємо знайдений час
-    return None  # Якщо час не знайдений
+        return match.group(0)
+    return None
 
-# Функція для перевірки та перенесення задачі, якщо наближається дедлайн
+# Function to check and move tasks nearing deadline
 def move_event_if_near_deadline(task_service, task_list_ids, new_task_list_id):
     now = datetime.now(pytz.timezone("Europe/Kyiv"))
-    print(f"Перевіряємо задачі на наявність дедлайну до {now}")
+    print(f"Checking tasks with deadlines approaching by {now}")
 
     for task_list_id in task_list_ids:
         tasks = task_service.tasks().list(tasklist=task_list_id).execute().get('items', [])
 
         for task in tasks:
-            print(f"Перевіряємо задачу: {task['title']}")
+            print(f"Checking task: {task['title']}")
             if 'due' in task:
                 due_date_str = task['due']
                 due_date = datetime.strptime(due_date_str, "%Y-%m-%dT%H:%M:%S.%fZ")
                 due_date = pytz.utc.localize(due_date)
 
-                # Переносимо задачу в новий список, якщо наближається до дедлайну
+                # Move task if deadline is approaching
                 if now + timedelta(days=3) >= due_date:
-                    print(f"Задача '{task['title']}' наближається до дедлайну: {due_date}")
+                    print(f"Task '{task['title']}' nearing deadline: {due_date}")
                     move_task_to_another_list(task_service, task['id'], task_list_id, new_task_list_id)
                 else:
-                    print(f"Задача '{task['title']}' не переноситься (дедлайн ще не наближається).")
+                    print(f"Task '{task['title']}' not moved (deadline not approaching).")
 
+# Clear all the test data before running script
+
+def clear_all_tasks(task_service, task_list_ids):
+    """Clear all tasks from the provided task list IDs."""
+    for task_list_id in task_list_ids:
+        tasks = task_service.tasks().list(tasklist=task_list_id).execute().get('items', [])
+        for task in tasks:
+            task_service.tasks().delete(tasklist=task_list_id, task=task['id']).execute()
+        print(f"Cleared all tasks from list: {task_list_id}")
+
+# Main function to authenticate and run the task moving logic
 def main():
     try:
         task_service, calendar_service = get_authenticated_service()
 
-        # Перелік ID списків задач, з яких ви хочете переносити задачі
-        task_list_ids = ['bkF6Njh0Z0VNR2gtZzloYw', 'UXJkNEhDOFNuVXUwU2JLSg', 'Sl9xOHloVFpFOHg1VTNuUg']
-        new_task_list_id = 'MTY0MDIzMzk3NjY5NDgyOTE5NjI6MDow'
+        # Dynamically fetch task list IDs
+        task_list_ids = get_task_list_ids(task_service)
+        new_task_list_id = 'YOUR_NEW_TASK_LIST_ID'  # Replace with the actual ID of the destination list
 
-        # Перевірка задач на наближення дедлайну
+        # Check for deadlines and move tasks
         move_event_if_near_deadline(task_service, task_list_ids, new_task_list_id)
         
     except HttpError as error:
