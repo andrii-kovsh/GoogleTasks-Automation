@@ -8,6 +8,7 @@
 .vs (2)/
 bin/
 obj/
+python/
 __pycache__
 *.pyproj
 *.sln
@@ -18,4 +19,5 @@ __pycache__
 *.dbmdl
 *.bak
 *.log
-"credentials.json" 
+.git \342\200\223 \320\272\320\276\320\277\321\226\321\217/
+
