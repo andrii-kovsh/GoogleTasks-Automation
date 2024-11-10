@@ -33,13 +33,24 @@ def get_authenticated_service():
 
     return build('tasks', 'v1', credentials=creds), build('calendar', 'v3', credentials=creds)
 
-# Function to dynamically fetch all task list IDs
-def get_task_list_ids(task_service):
-    task_lists = task_service.tasklists().list().execute().get('items', [])
-    return [task_list['id'] for task_list in task_lists]
+# Function to dynamically fetch primary and secondary task lists
+def get_primary_and_secondary_lists(task_service):
+    try:
+        task_lists = task_service.tasklists().list().execute().get('items', [])
+        if not task_lists:
+            print("No task lists found.")
+            return None, None
 
-# Function to move a task to a new list and preserve its deadline
-def move_task_to_another_list(task_service, task_id, current_task_list_id, new_task_list_id):
+        primary_list_id = task_lists[0]['id']  # First list as primary
+        secondary_list_ids = [(task_list['id'], task_list['title']) for task_list in task_lists[1:]]  # All others as secondary
+
+        return primary_list_id, secondary_list_ids
+    except HttpError as error:
+        print(f"An error occurred while fetching task lists: {error}")
+        return None, None
+
+# Function to move a task to the primary list and preserve its deadline
+def move_task_to_primary_list(task_service, task_id, current_task_list_id, primary_task_list_id, current_task_list_name):
     task = task_service.tasks().get(tasklist=current_task_list_id, task=task_id).execute()
     due_date = task.get('due', None)
 
@@ -47,7 +58,6 @@ def move_task_to_another_list(task_service, task_id, current_task_list_id, new_t
     task_time = None
     if 'notes' in task:
         task_time = convert_notes_to_due_time(task['notes'])
-        print(f"Time from notes: {task_time}")
 
     # Remove unnecessary fields for insertion
     for key in ['id', 'etag', 'selfLink', 'position', 'updated']:
@@ -59,9 +69,9 @@ def move_task_to_another_list(task_service, task_id, current_task_list_id, new_t
     if task_time:
         task['notes'] = f"📅 Deadline time: {task_time}"
 
-    # Insert task in the new list
-    new_task = task_service.tasks().insert(tasklist=new_task_list_id, body=task).execute()
-    print(f"Task '{new_task['title']}' moved to new list: {new_task_list_id} with deadline {new_task.get('due', 'no deadline')}")
+    # Insert task in the primary list
+    new_task = task_service.tasks().insert(tasklist=primary_task_list_id, body=task).execute()
+    print(f"Moved task '{new_task['title']}' with deadline {new_task.get('due', 'no deadline')} from '{current_task_list_name}' to the primary list.")
 
     # Delete the original task from the old list
     task_service.tasks().delete(tasklist=current_task_list_id, task=task_id).execute()
@@ -96,27 +106,25 @@ def move_tasks_nearing_deadline(task_service, primary_task_list_id, secondary_ta
     if not tasks_moved:
         print("Ніяких завдань не перенесено, насолоджуйся днем ☀️")
 
-# Clear all the test data before running script
 
-def clear_all_tasks(task_service, task_list_ids):
-    """Clear all tasks from the provided task list IDs."""
-    for task_list_id in task_list_ids:
-        tasks = task_service.tasks().list(tasklist=task_list_id).execute().get('items', [])
-        for task in tasks:
-            task_service.tasks().delete(tasklist=task_list_id, task=task['id']).execute()
-        print(f"Cleared all tasks from list: {task_list_id}")
+    # Додаємо повідомлення, якщо немає завдань для переносу
+    if not tasks_moved:
+        print("Ніяких завдань не перенесено, насолоджуйся днем ☀️")
 
 # Main function to authenticate and run the task moving logic
 def main():
     try:
-        task_service, calendar_service = get_authenticated_service()
+        task_service, _ = get_authenticated_service()
 
-        # Dynamically fetch task list IDs
-        task_list_ids = get_task_list_ids(task_service)
-        new_task_list_id = 'YOUR_NEW_TASK_LIST_ID'  # Replace with the actual ID of the destination list
+        # Dynamically fetch primary and secondary task list IDs
+        primary_task_list_id, secondary_task_list_ids = get_primary_and_secondary_lists(task_service)
 
-        # Check for deadlines and move tasks
-        move_event_if_near_deadline(task_service, task_list_ids, new_task_list_id)
+        # Ensure that we have a primary list and at least one secondary list
+        if primary_task_list_id and secondary_task_list_ids:
+            # Check for deadlines and move tasks as necessary
+            move_tasks_nearing_deadline(task_service, primary_task_list_id, secondary_task_list_ids)
+        else:
+            print("Unable to proceed without both primary and secondary task lists.")
         
     except HttpError as error:
         print(f"An error occurred: {error}")
