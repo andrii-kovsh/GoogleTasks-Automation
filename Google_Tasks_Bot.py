@@ -74,26 +74,27 @@ def convert_notes_to_due_time(notes):
     return None
 
 # Function to check and move tasks nearing deadline
-def move_event_if_near_deadline(task_service, task_list_ids, new_task_list_id):
+def move_tasks_nearing_deadline(task_service, primary_task_list_id, secondary_task_list_ids):
     now = datetime.now(pytz.timezone("Europe/Kyiv"))
-    print(f"Checking tasks with deadlines approaching by {now}")
+    tasks_moved = False  # Прапорець для перевірки, чи є перенесені завдання
 
-    for task_list_id in task_list_ids:
+    for task_list_id, task_list_name in secondary_task_list_ids:
         tasks = task_service.tasks().list(tasklist=task_list_id).execute().get('items', [])
 
         for task in tasks:
-            print(f"Checking task: {task['title']}")
             if 'due' in task:
                 due_date_str = task['due']
                 due_date = datetime.strptime(due_date_str, "%Y-%m-%dT%H:%M:%S.%fZ")
                 due_date = pytz.utc.localize(due_date)
 
-                # Move task if deadline is approaching
+                # Перевіряємо, чи наближається дедлайн, і переміщуємо завдання
                 if now + timedelta(days=3) >= due_date:
-                    print(f"Task '{task['title']}' nearing deadline: {due_date}")
-                    move_task_to_another_list(task_service, task['id'], task_list_id, new_task_list_id)
-                else:
-                    print(f"Task '{task['title']}' not moved (deadline not approaching).")
+                    move_task_to_primary_list(task_service, task['id'], task_list_id, primary_task_list_id, task_list_name)
+                    tasks_moved = True  # Позначаємо, що хоча б одне завдання було перенесене
+
+    # Додаємо повідомлення, якщо немає завдань для переносу
+    if not tasks_moved:
+        print("Ніяких завдань не перенесено, насолоджуйся днем ☀️")
 
 # Clear all the test data before running script
 
