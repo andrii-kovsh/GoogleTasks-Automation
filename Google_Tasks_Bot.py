@@ -106,6 +106,11 @@ def move_tasks_nearing_deadline(task_service, primary_task_list_id, secondary_ta
     if not tasks_moved:
         print("Ніяких завдань не перенесено, насолоджуйся днем ☀️")
 
+
+    # Додаємо повідомлення, якщо немає завдань для переносу
+    if not tasks_moved:
+        print("Ніяких завдань не перенесено, насолоджуйся днем ☀️")
+
 # Main function to authenticate and run the task moving logic
 def main():
     try:
