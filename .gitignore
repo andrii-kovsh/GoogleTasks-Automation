@@ -21,3 +21,5 @@ __pycache__
 *.log
 .git \342\200\223 \320\272\320\276\320\277\321\226\321\217/
 
+/token.pickle
+/credentials.json
